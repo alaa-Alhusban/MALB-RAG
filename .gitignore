@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+logs/
+data/original/universities/*/
+data/multi_university/pages.csv
+data/processed/*
+data/processed_multi/
+data/processed_confirm/
+results_multi/
+reports_multi/
+results_confirm/
+results/cache/
+*.lock
+*.pkl

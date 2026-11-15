@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "If you use this code or benchmark, please cite the paper."
+title: "Morphological and Cross-Lingual Asymmetry in Arabic–English Retrieval-Augmented Generation: Controlled Evaluation and a Prospectively Confirmed Multi-Institution Pipeline"
+authors:
+  - family-names: Alhusban
+    given-names: Alaa
+    affiliation: Al Ain University
+  - family-names: Ahmed
+    given-names: Brahim
+    affiliation: Al Ain University
+  - family-names: Marid
+    given-names: Remonda
+    affiliation: Al Ain University
+repository-code: "https://github.com/alaa-Alhusban/MALB-RAG"
+license: MIT

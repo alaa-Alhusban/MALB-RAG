@@ -1,0 +1,181 @@
+# =====================================================================
+# AAU Arabic–English RAG experiment — single source of configuration.
+# Every parameter below is FIXED A PRIORI (no value is tuned on the
+# evaluation questions). Change values only before a run, and record why.
+# =====================================================================
+project_name: Multi_University_RAG_Experiment
+seed: 20261107
+
+dataset:
+  # Six UAE universities, 11 handbooks, 72 validated needs x 3 variants = 216 queries
+  mode: multi_university
+  min_passage_words: 5
+  institution_label: UAE university
+
+paths:
+  mu_pages_csv: data/multi_university/pages.csv
+  mu_sources_csv: data/multi_university/SOURCES.csv
+  mu_needs_csv: data/multi_university/multi_university_needs.csv
+  mu_queries_csv: data/multi_university/multi_university_queries.csv
+  # Folder produced by extracting AAU_RAG_Project(_Updated).zip
+  source_project: data/original/AAU_RAG_Project
+  pdf_dir: data/original/AAU_RAG_Project/data/original/documents
+  # Full handbooks (download them here) — used only for distractor passages
+  full_pdf_dir: data/original/full_documents
+  original_csv: data/original/AAU_RAG_Project/data/original/dataset.csv
+  cleaned_csv: data/original/AAU_RAG_Project/data/cleaned/dataset_cleaned.csv
+  chunk_csv: data/original/AAU_RAG_Project/data/preprocessed/dataset_raw.csv
+  preprocessed_dir: data/original/AAU_RAG_Project/data/preprocessed
+  qa_xlsx: data/original/AAU_RAG_Project/data/evaluation/AAU_Trilingual_RAG_Gold_QA_180.xlsx
+  processed_dir: data/processed_multi
+  annotations_dir: data/annotations
+  results_dir: results_multi
+  reports_dir: reports_multi
+  cache_dir: results_multi/cache
+  log_dir: logs
+
+corpus:
+  # Re-use the 60 existing page-bounded chunks so passage identity is fixed
+  use_existing_chunks: true
+  # Extraction repair (NOT an experimental condition): undo the lam-alef
+  # ligature reversal found in the PDF text layer. Applied identically to
+  # every condition. Set false to run the "unrepaired" sensitivity analysis.
+  repair_lam_alef: true
+  ligature_backend: pdfplumber   # pdfplumber (tested) | pymupdf (untested here)
+  # Corpus expansion: add every other page of the 7 full source handbooks as
+  # distractor passages (gold passages, IDs and annotations stay unchanged).
+  # Silently a no-op if the PDFs are not in paths.full_pdf_dir.
+  distractors:
+    enabled: true
+    exclude_gold_source_pages: true   # the pages already used as gold excerpts
+    min_words: 20
+    max_words: 180
+    overlap_words: 22
+  # Used only if use_existing_chunks is false
+  rechunk:
+    max_words: 180
+    overlap_words: 22
+    page_bounded: true
+
+gold:
+  # Bigram-coverage thresholds used to align workbook evidence to chunk IDs
+  grade2_coverage: 0.80     # chunk contains (almost) the whole evidence span
+  grade1_coverage: 0.30     # chunk contains part of the evidence span
+  evidence_hit_coverage: 0.80   # union coverage of top-K needed for evidence Recall@K
+  # Only annotations whose Annotation_Status == "validated" are used for
+  # confirmatory analysis. Until then every result is PRELIMINARY.
+  validated_file: data/annotations/gold_validation_sheet.xlsx   # AAU mode only; multi-university evidence is already validated
+
+split:
+  dev_fraction: 0.33          # information-need-level split (all 3 variants together)
+  stratify_by: [University, Evidence_Language]   # multi_university mode
+  # No parameter is tuned, so the pre-registered analysis may use all needs.
+  # Set to "test" to restrict statistics to the held-out test needs.
+  confirmatory_partition: all
+
+preprocessing:
+  primary: [P1, P2, P3]
+  sides: [Q, D, QD]
+  ablations: [A_ALEF, A_DIAC, A_TAA, P1_TAA, LEGACY_COMBINED]
+  segmenter: auto      # auto -> CAMeL Tools if importable, else heuristic fallback
+  camel_scheme: d3tok
+  segmentation_marker: "+"
+  remove_tatweel_in_common_cleanup: true
+
+retrieval:
+  top_k: 10
+  models: [bm25, e5, bge_m3, hybrid]
+  # Dense models (e5, bge_m3, hybrid) skip the exploratory ablation configs to save
+  # encoding time on large corpora; BM25 always runs every configuration.
+  dense_skip_ablations: true
+  index_settings: [pooled, arabic, english]
+  bm25:
+    k1: 1.5
+    b: 0.75
+    lowercase_latin: true
+  e5:
+    checkpoint: intfloat/multilingual-e5-large
+    query_prefix: "query: "
+    passage_prefix: "passage: "
+    max_length: 512
+    batch_size: 16
+    normalize: true
+  bge_m3:
+    checkpoint: BAAI/bge-m3
+    max_length: 1024
+    batch_size: 8
+    fp16: true
+    normalize: true
+  hybrid:
+    components: [bm25, bge_m3]
+    rrf_c: 60          # Cormack et al. (2009) default, fixed a priori
+    depth: 100
+
+malb:
+  # MALB-RAG (src/malb.py). Only prep and w_bm25 are tuned, per query language, on DEV needs.
+  prep_candidates: [P0, P1, P2, P3]   # P2 falls back to P2H if CAMeL Tools is missing
+  rrf_weight_grid: [0.0, 0.25, 0.5, 0.75, 1.0]   # BM25 weight; dense weight = 1 - w
+  depth: 100            # per-list retrieval depth before fusion
+  rerank_depth: 50      # fused candidates re-scored by the cross-encoder
+  test_partition: test  # confirmatory comparisons use held-out TEST needs only
+  use_test_doubles: false
+  reranker:
+    checkpoint: BAAI/bge-reranker-v2-m3
+    max_length: 512
+    batch_size: 32
+    fp16: true
+  baselines: [[bm25, P0], [bm25, P3-QD], [bge_m3, P0], [hybrid, P0], [e5, P0]]
+
+malb_cv:
+  # MALB v2 (src/malb_cv.py) — POST-HOC grid, nested 5-fold cross-validation by need
+  n_folds: 5
+  chunkings:
+    - {max_words: 180, overlap_words: 22}   # main corpus
+    - {max_words: 100, overlap_words: 20}
+  dense_docprep: [raw, P3]                  # P3 on documents only for BGE-M3
+  rerank_depths: [50, 100]
+  use_query_translation: true               # MALB v3: adds query translation (on/off) to the grid
+  rerank_query_language: [orig, matched]    # MALB v4: reranker scores each passage with the query in the passage's language
+  university_filter: true                   # extra variant MALB_v4_unifilter: candidates restricted to the university named in the question
+
+translation:
+  # MALB v3 query translation (src/translation.py); cached in data/processed_multi/query_translations.csv
+  model: Qwen/Qwen2.5-7B-Instruct
+  max_new_tokens: 96
+  use_test_double: false
+
+evaluation:
+  ks: [1, 3, 5, 10]
+  primary_metric: ndcg@10
+  primary_index: pooled
+
+statistics:
+  n_bootstrap: 10000
+  n_permutations: 10000
+  ci_level: 0.95
+  alpha: 0.05
+  correction: holm
+
+generation:
+  enabled: false            # set true in Colab when an LLM is available
+  backend: hf               # hf | openai | anthropic
+  hf_model: Qwen/Qwen2.5-7B-Instruct
+  openai_model: gpt-4o-mini
+  anthropic_model: claude-sonnet-4-5
+  api_base_url: null        # optional OpenAI-compatible endpoint
+  top_k_context: 5
+  temperature: 0.0
+  max_new_tokens: 256
+  load_in_4bit: false      # Qwen2.5-7B in fp16 fits a 20 GB GPU
+  # Pre-specified (not data-selected) conditions to generate for
+  conditions:
+    models: [bge_m3, hybrid, malb, malb_v4, malb_v4_uni]
+    configs: [P0, MALB, MALB_v4, MALB_v4_uni]
+    index: pooled
+  oracle: true              # verified gold passages given directly
+  evidence_withheld: true   # gold passages removed -> expected abstention
+  max_queries: null         # e.g. 30 for a quick run
+
+faithfulness:
+  llm_judge: false          # optional automatic judge (labelled automatic)
+  claim_support_threshold: 0.6
